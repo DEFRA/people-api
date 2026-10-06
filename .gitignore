@@ -8,8 +8,6 @@ keys/
 *.userosscache
 *.sln.docstates
 
-Docs/
-
 .vscode/
 bin/
 obj/
@@ -38,7 +36,7 @@ bld/
 .vs/
 
 # GitHub repository configuration
-/.github/
+/.github/prompts
 
 # .NET Core
 project.lock.json
