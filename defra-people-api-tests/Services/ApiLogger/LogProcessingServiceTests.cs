@@ -64,7 +64,11 @@ public class LogProcessingServiceTests
         
         // Act
         await _service.StartAsync(cancellationTokenSource.Token);
+        // Give ExecuteAsync time to start; on .NET 10 stopping before it starts skips it entirely
+        await Task.Delay(100);
         await _service.StopAsync(cancellationTokenSource.Token);
+        // Wait for ExecuteAsync to finish so the "stopping" log has been written
+        await _service.ExecuteTask!;
         
         // Assert
         _mockLogger.Verify(
