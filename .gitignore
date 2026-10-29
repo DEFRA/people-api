@@ -13,7 +13,6 @@ Docs/
 .vscode/
 bin/
 obj/
-*/Keys/
 secrets.json
 Properties/
 appsettings.*.json
