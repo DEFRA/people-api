@@ -1,5 +1,5 @@
-# Encryption keys
-keys/
+# Encryption keys (root only; anchored so it doesn't match Services/Keys on case-insensitive filesystems)
+/keys/
 
 # User-specific files
 *.rsuser
@@ -11,7 +11,6 @@ keys/
 .vscode/
 bin/
 obj/
-*/Keys/
 secrets.json
 Properties/
 appsettings.*.json
