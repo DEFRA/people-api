@@ -36,7 +36,7 @@ bld/
 .vs/
 
 # GitHub repository configuration
-/.github/prompts
+/.github/skills
 
 # .NET Core
 project.lock.json
