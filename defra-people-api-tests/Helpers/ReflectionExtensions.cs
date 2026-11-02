@@ -25,7 +25,7 @@ namespace defra.people_api_tests.Helpers
             if (method == null)
                 throw new ArgumentException($"Method '{methodName}' not found on type '{type.FullName}'");
                 
-            return (T)method.Invoke(obj, parameters);
+            return (T)method.Invoke(obj, parameters)!;
         }
         
         /// <summary>

@@ -16,7 +16,7 @@ public class GraphClientFactoryTests
     {
         // Arrange
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string>
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 {"GraphApi:ClientId", "test-client-id"},
                 {"GraphApi:ClientSecret", "test-client-secret"},
@@ -40,7 +40,7 @@ public class GraphClientFactoryTests
     {
         // Arrange
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string>
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 {"GraphApi:ClientId", "test-client-id"},
                 {"GraphApi:ClientSecret", "test-client-secret"},
@@ -65,7 +65,7 @@ public class GraphClientFactoryTests
     {
         // Arrange
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string>
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 {"GraphApi:ClientId", "test-client-id"},
                 {"GraphApi:ClientSecret", "test-client-secret"},

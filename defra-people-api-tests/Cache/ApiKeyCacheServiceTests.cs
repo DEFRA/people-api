@@ -36,7 +36,7 @@ public class ApiKeyCacheServiceTests
         
         // Get the test keys directory from the ApiKeyCacheService using reflection
         var field = typeof(ApiKeyCacheService).GetField("_keysDirectory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        _testKeysDirectory = (string)field.GetValue(_apiKeyCacheService);
+        _testKeysDirectory = (string)field.GetValue(_apiKeyCacheService)!;
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class ApiKeyCacheServiceTests
 
         // Use reflection to access the private _keyCache field
         var field = typeof(ApiKeyCacheService).GetField("_keyCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var keyCache = (System.Collections.Generic.Dictionary<string, AccessKey>)field.GetValue(_apiKeyCacheService);
+        var keyCache = (System.Collections.Generic.Dictionary<string, AccessKey>)field.GetValue(_apiKeyCacheService)!;
         keyCache.Add("test-key", accessKey);
 
         // Act
@@ -95,7 +95,7 @@ public class ApiKeyCacheServiceTests
 
         // Use reflection to access the private _keyCache field
         var field = typeof(ApiKeyCacheService).GetField("_keyCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var keyCache = (System.Collections.Generic.Dictionary<string, AccessKey>)field.GetValue(_apiKeyCacheService);
+        var keyCache = (System.Collections.Generic.Dictionary<string, AccessKey>)field.GetValue(_apiKeyCacheService)!;
         keyCache.Add("test-key-1", accessKey1);
         keyCache.Add("test-key-2", accessKey2);
 
@@ -152,7 +152,7 @@ public class ApiKeyCacheServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Refreshing API key cache")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 }

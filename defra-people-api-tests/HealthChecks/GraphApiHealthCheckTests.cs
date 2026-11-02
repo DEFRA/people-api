@@ -24,7 +24,7 @@ public class GraphApiHealthCheckTests
     public async Task CheckHealthAsync_WhenGraphClientCannotBeCreated_ReturnsUnhealthy()
     {
         // Arrange
-        _mockGraphClientFactory.Setup(x => x.CreateClient()).Returns((GraphServiceClient)null);
+        _mockGraphClientFactory.Setup(x => x.CreateClient()).Returns((GraphServiceClient)null!);
 
         // Act
         var result = await _healthCheck.CheckHealthAsync(new HealthCheckContext());

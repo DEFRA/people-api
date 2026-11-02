@@ -27,7 +27,7 @@ public class GraphServiceTests
         // Get the private method using reflection
         _addManagerPropertiesToAdditionalDataMethod = typeof(GraphService).GetMethod(
             "AddManagerPropertiesToAdditionalData", 
-            BindingFlags.NonPublic | BindingFlags.Instance);
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
     }
 
     #region AddManagerPropertiesToAdditionalData Tests

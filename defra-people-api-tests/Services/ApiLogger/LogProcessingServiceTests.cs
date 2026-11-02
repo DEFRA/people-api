@@ -52,7 +52,7 @@ public class LogProcessingServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("starting")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
     
@@ -77,7 +77,7 @@ public class LogProcessingServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("stopping")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 }

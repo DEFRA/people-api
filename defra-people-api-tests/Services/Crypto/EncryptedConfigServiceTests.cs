@@ -46,7 +46,7 @@ public class EncryptedConfigServiceTests
     public void EnsureMasterKeyEncrypted_WhenKeyIsNull_LogsAndReturns()
     {
         // Arrange
-        _mockConfiguration.Setup(x => x["Encryption:MasterKey"]).Returns((string)null);
+        _mockConfiguration.Setup(x => x["Encryption:MasterKey"]).Returns((string?)null);
 
         // Act
         _service.EnsureMasterKeyEncrypted();
@@ -58,7 +58,7 @@ public class EncryptedConfigServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("already protected or not set")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 
@@ -78,7 +78,7 @@ public class EncryptedConfigServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("already protected or not set")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 
@@ -93,7 +93,7 @@ public class EncryptedConfigServiceTests
     public void EnsureAdminApiKeyEncrypted_WhenKeyIsNull_LogsAndReturns()
     {
         // Arrange
-        _mockConfiguration.Setup(x => x["Authentication:AdminApiKey"]).Returns((string)null);
+        _mockConfiguration.Setup(x => x["Authentication:AdminApiKey"]).Returns((string?)null);
 
         // Act
         _service.EnsureAdminApiKeyEncrypted();
@@ -105,7 +105,7 @@ public class EncryptedConfigServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("already protected or not set")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 
@@ -125,7 +125,7 @@ public class EncryptedConfigServiceTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("already protected or not set")),
                 It.IsAny<Exception>(),
-                (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
             Times.Once);
     }
 

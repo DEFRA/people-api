@@ -17,14 +17,15 @@ public class EncryptionService : IEncryptionService
         string configKey = masterKeyProvider.GetMasterKey();
         
         // Derive a consistent key and IV from the configuration string
-        using var deriveBytes = new Rfc2898DeriveBytes(
-            configKey,
+        byte[] derivedBytes = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(configKey),
             Encoding.UTF8.GetBytes("DefraApiKeyMasterSalt"),
             10000,
-            HashAlgorithmName.SHA256);
-            
-        _masterKey = deriveBytes.GetBytes(32); // 256 bits
-        _masterIv = deriveBytes.GetBytes(16);  // 128 bits
+            HashAlgorithmName.SHA256,
+            32 + 16);
+
+        _masterKey = derivedBytes[..32];  // 256 bits
+        _masterIv = derivedBytes[32..];   // 128 bits
     }
 
     public (string encryptedText, string encryptionKey) Encrypt(string plainText)

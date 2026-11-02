@@ -57,7 +57,7 @@ public class MasterKeyProviderTests
     public void GetMasterKey_WhenKeyNotConfigured_ThrowsException()
     {
         // Arrange
-        _mockConfiguration.Setup(x => x["Encryption:MasterKey"]).Returns((string)null);
+        _mockConfiguration.Setup(x => x["Encryption:MasterKey"]).Returns((string?)null);
 
         var provider = new MasterKeyProvider(
             _mockConfiguration.Object,
