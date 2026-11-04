@@ -107,7 +107,7 @@ public class MasterKeyProviderTests
     [InlineData("protected-value", false)]
     [InlineData("", false)]
     [InlineData(null, false)]
-    public void IsDataProtected_ReturnsExpectedResult(string value, bool expected)
+    public void IsDataProtected_ReturnsExpectedResult(string? value, bool expected)
     {
         // Act
         var result = MasterKeyProvider.IsDataProtected(value);

@@ -21,6 +21,22 @@ public class GraphClientFactory : IGraphClientFactory
         var tenantId = graphConfig.TenantId;
         var scopes = graphConfig.Scopes ?? new string[] { "User.Read.All" };
 
+        // No client secret configured: use a managed identity (or other environment-ambient
+        // credential) instead of a stored secret - the recommended approach for Azure-hosted compute.
+        // GraphApi:ManagedIdentityClientId is only needed for a user-assigned identity; leave unset
+        // to use the compute's system-assigned identity.
+        if (string.IsNullOrWhiteSpace(clientSecret))
+        {
+            var managedIdentityClientId = _configuration["GraphApi:ManagedIdentityClientId"];
+            var managedIdentityOptions = new DefaultAzureCredentialOptions
+            {
+                AuthorityHost = AzureAuthorityHosts.AzurePublicCloud,
+                ManagedIdentityClientId = string.IsNullOrWhiteSpace(managedIdentityClientId) ? null : managedIdentityClientId
+            };
+
+            return new GraphServiceClient(new DefaultAzureCredential(managedIdentityOptions), scopes);
+        }
+
         var options = new ClientSecretCredentialOptions
         {
             AuthorityHost = AzureAuthorityHosts.AzurePublicCloud

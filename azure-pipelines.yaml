@@ -29,7 +29,7 @@ stages:
       - task: UseDotNet@2
         inputs:
           packageType: 'sdk'
-          version: '8.x'
+          version: '10.x'
           installationPath: $(Agent.ToolsDirectory)/dotnet
           
       - task: DotNetCoreCLI@2

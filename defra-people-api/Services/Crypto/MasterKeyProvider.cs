@@ -53,7 +53,7 @@ public class MasterKeyProvider : IMasterKeyProvider
         return masterKey;
     }
 
-    public static bool IsDataProtected(string value)
+    public static bool IsDataProtected(string? value)
     {
         return !string.IsNullOrEmpty(value) && value.StartsWith(EncryptedConfigService.DataProtectionPrefix);
     }

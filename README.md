@@ -102,3 +102,37 @@ The API will be available at `https://localhost:7068` by default.
 - `/admin/generate-api-key`
 - `/admin/refresh-api-keys`
 
+### Health Checks
+
+- `/health/live` - liveness probe (process is running)
+- `/health/ready` - readiness probe (Microsoft Graph + log database reachable)
+- `/health` - combined health check view
+
+### API Documentation
+
+Swagger/OpenAPI UI is available at `/swagger`, enabled by default in the Development environment. Set `Swagger:Enabled=true` to expose it in another environment (avoid enabling it in Production).
+
+## Authentication
+
+Existing `X-API-Key` header authentication is unchanged for all current consumers. Optionally, setting `AzureAd:TenantId` and `AzureAd:Audience` (or `ClientId`) additionally accepts a Microsoft Entra ID bearer token (`Authorization: Bearer <token>`) on the same endpoints - this is additive and does not require existing API-key consumers to change.
+
+## Microsoft Graph credentials
+
+By default the Graph client uses `GraphApi:ClientId`/`ClientSecret`/`TenantId` (client-credentials flow), unchanged. If `GraphApi:ClientSecret` is left empty, the app instead uses a managed identity (`DefaultAzureCredential`) - recommended when hosting in Azure, since no secret needs to be stored.
+
+## Azure Key Vault and Application Insights
+
+- Set `KeyVault:Uri` to an Azure Key Vault URL to merge Key Vault secrets into configuration (authenticates via `DefaultAzureCredential`).
+- Set `ApplicationInsights:ConnectionString` or the `APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable to enable Application Insights telemetry and exception tracking.
+
+## Containerisation
+
+Run from the `people-api` directory (repository root of this project):
+
+```bash
+docker build -t defra-people-api -f Dockerfile .
+docker run -p 8080:8080 defra-people-api
+```
+
+See [docs/Operations-Notes.md](docs/Operations-Notes.md) for the full configuration reference, health checks, and known limitations, and [docs/Consumer-Handoff.md](docs/Consumer-Handoff.md) for the consumer-facing contract summary.
+

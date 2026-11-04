@@ -84,7 +84,7 @@ public class EncryptedConfigService : IEncryptedConfigService
         }
     }
     
-    public static bool IsDataProtected(string value)
+    public static bool IsDataProtected(string? value)
     {
         return !string.IsNullOrEmpty(value) && value.StartsWith(DataProtectionPrefix);
     }
