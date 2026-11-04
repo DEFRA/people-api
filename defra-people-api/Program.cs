@@ -101,7 +101,9 @@ builder.Services.AddAuthorization(options =>
         }));
 });
 
-builder.Services.AddDataProtection();
+// Persists the Data Protection key ring to Blob Storage + Key Vault when DataProtection:Enabled is
+// true, so AdminApiKey/MasterKey protection survives restarts and is shared across replicas.
+builder.Services.AddPeopleApiDataProtection(builder.Configuration);
 
 // Careful with reordering these some depend on each other
 builder.Services.AddSingleton<IMasterKeyProvider, MasterKeyProvider>();

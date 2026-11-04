@@ -125,6 +125,10 @@ By default the Graph client uses `GraphApi:ClientId`/`ClientSecret`/`TenantId` (
 - Set `KeyVault:Uri` to an Azure Key Vault URL to merge Key Vault secrets into configuration (authenticates via `DefaultAzureCredential`).
 - Set `ApplicationInsights:ConnectionString` or the `APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable to enable Application Insights telemetry and exception tracking.
 
+## Data Protection key ring
+
+By default the Data Protection key ring is local/ephemeral (fine for a single instance, but lost on restart and not shared across replicas). Set `DataProtection:Enabled=true` (plus `BlobUri`, `KeyIdentifier`, `ApplicationName`, `ManagedIdentityClientId`) to persist it to Blob Storage, wrapped by a Key Vault key, via a user-assigned managed identity. See [infra/README.md](infra/README.md) for the Bicep templates that provision this, and [docs/Operations-Notes.md](docs/Operations-Notes.md) for the full setting reference.
+
 ## Containerisation
 
 Run from the `people-api` directory (repository root of this project):
