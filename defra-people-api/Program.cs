@@ -9,6 +9,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Defra_People_API.Services.Graph;
 using Defra_People_API.Cache;
 using Azure.Identity;
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -104,6 +105,17 @@ builder.Services.AddAuthorization(options =>
 // Persists the Data Protection key ring to Blob Storage + Key Vault when DataProtection:Enabled is
 // true, so AdminApiKey/MasterKey protection survives restarts and is shared across replicas.
 builder.Services.AddPeopleApiDataProtection(builder.Configuration);
+
+// Issued API keys are persisted to Blob Storage, not local disk, so they survive restarts and
+// are shared across replicas/redeploys (container filesystems are ephemeral and per-instance).
+var apiKeyContainerUri = builder.Configuration["ApiKeyStorage:ContainerUri"]
+    ?? throw new InvalidOperationException("ApiKeyStorage:ContainerUri is not configured");
+var apiKeyManagedIdentityClientId = builder.Configuration["ApiKeyStorage:ManagedIdentityClientId"];
+builder.Services.AddSingleton(new BlobContainerClient(new Uri(apiKeyContainerUri), new DefaultAzureCredential(new DefaultAzureCredentialOptions
+{
+    ManagedIdentityClientId = string.IsNullOrWhiteSpace(apiKeyManagedIdentityClientId) ? null : apiKeyManagedIdentityClientId
+})));
+builder.Services.AddSingleton<IApiKeyBlobStore, ApiKeyBlobStore>();
 
 // Careful with reordering these some depend on each other
 builder.Services.AddSingleton<IMasterKeyProvider, MasterKeyProvider>();

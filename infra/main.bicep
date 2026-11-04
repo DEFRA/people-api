@@ -42,6 +42,7 @@ param wrappingKeySize int
 var stem = '${prefix}-${environmentName}'
 var globalStem = '${prefix}${environmentName}${uniqueString(resourceGroup().id, prefix, environmentName)}'
 var keyRingContainerName = 'data-protection'
+var apiKeyContainerName = 'api-keys'
 var wrappingKeyName = 'data-protection'
 
 // Runtime identity for people-api; grant it access to Key Vault secrets (GraphApi/LogDb/Encryption
@@ -118,6 +119,18 @@ module storage 'br/public:avm/res/storage/storage-account:0.33.1' = {
             }
           ]
         }
+        {
+          // Issued API keys (ApiKeyCacheService/ApiKeyBlobStore); replaces the old local Keys/*.key files.
+          name: apiKeyContainerName
+          publicAccess: 'None'
+          roleAssignments: [
+            {
+              principalId: identity.outputs.principalId
+              principalType: 'ServicePrincipal'
+              roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+            }
+          ]
+        }
       ]
     }
   }
@@ -132,6 +145,7 @@ output storageAccountName string = storage.outputs.name
 output dataProtectionBlobUri string = 'https://${storage.outputs.name}.blob.${az.environment().suffixes.storage}/${keyRingContainerName}/keys.xml'
 output dataProtectionKeyIdentifier string = '${vault.outputs.uri}keys/${wrappingKeyName}'
 output dataProtectionApplicationName string = '${stem}-app'
+output apiKeyStorageContainerUri string = 'https://${storage.outputs.name}.blob.${az.environment().suffixes.storage}/${apiKeyContainerName}'
 output dataProtectionKeyBootstrap object = {
   subscriptionId: subscription().subscriptionId
   resourceGroupName: resourceGroup().name

@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Defra_People_API.Cache;
@@ -15,14 +14,19 @@ public class ApiKeyCacheServiceTests
 {
     private readonly Mock<ILogger<ApiKeyCacheService>> _mockLogger;
     private readonly Mock<IEncryptionService> _mockEncryptionService;
-    private readonly string _testKeysDirectory;
+    private readonly Mock<IApiKeyBlobStore> _mockBlobStore;
     private readonly ApiKeyCacheService _apiKeyCacheService;
 
     public ApiKeyCacheServiceTests()
     {
         _mockLogger = new Mock<ILogger<ApiKeyCacheService>>();
         _mockEncryptionService = new Mock<IEncryptionService>();
-        
+        _mockBlobStore = new Mock<IApiKeyBlobStore>();
+
+        _mockBlobStore
+            .Setup(x => x.ListKeyBlobNames())
+            .Returns(Array.Empty<string>());
+
         // Set up encryption service mock
         _mockEncryptionService
             .Setup(x => x.Encrypt(It.IsAny<string>()))
@@ -32,11 +36,7 @@ public class ApiKeyCacheServiceTests
             .Setup(x => x.Decrypt(It.IsAny<string>(), It.IsAny<string>()))
             .Returns<string, string>((encryptedKey, encryptionKey) => "decrypted-key");
         
-        _apiKeyCacheService = new ApiKeyCacheService(_mockLogger.Object, _mockEncryptionService.Object);
-        
-        // Get the test keys directory from the ApiKeyCacheService using reflection
-        var field = typeof(ApiKeyCacheService).GetField("_keysDirectory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        _testKeysDirectory = (string)field.GetValue(_apiKeyCacheService)!;
+        _apiKeyCacheService = new ApiKeyCacheService(_mockLogger.Object, _mockEncryptionService.Object, _mockBlobStore.Object);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class ApiKeyCacheServiceTests
     }
 
     [Fact]
-    public async Task SaveKeyToFile_SavesKeyToFileAndAddsToCache()
+    public async Task SaveKeyToFile_UploadsKeyBlobAndAddsToCache()
     {
         // Arrange
         var accessKey = new AccessKey
@@ -120,23 +120,46 @@ public class ApiKeyCacheServiceTests
             Expires = DateTime.UtcNow.AddDays(30)
         };
 
+        string? uploadedBlobName = null;
+        _mockBlobStore
+            .Setup(x => x.UploadTextAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((name, _) => uploadedBlobName = name)
+            .Returns(Task.CompletedTask);
+
         // Act
         await _apiKeyCacheService.SaveKeyToFile(accessKey);
 
         // Assert
-        // Verify the key was added to the cache
         Assert.True(_apiKeyCacheService.IsValidKey("test-key"));
-        
-        // Verify the encryption service was called
         _mockEncryptionService.Verify(x => x.Encrypt("test-key"), Times.Once);
-        
-        // Verify a file was created in the keys directory
-        Assert.True(Directory.Exists(_testKeysDirectory));
-        var keyFiles = Directory.GetFiles(_testKeysDirectory, "*.key");
-        Assert.Contains(keyFiles, f => f.Contains("Test_Consumer"));
-        
-        // Note: We're not cleaning up the files here to avoid file access issues
-        // These will be cleaned up when the test runner exits
+        _mockBlobStore.Verify(x => x.UploadTextAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        Assert.NotNull(uploadedBlobName);
+        Assert.Contains("Test_Consumer", uploadedBlobName);
+        Assert.EndsWith(".key", uploadedBlobName);
+    }
+
+    [Fact]
+    public void LoadKeysFromDirectory_DecryptsAndCachesActiveKeys()
+    {
+        // Arrange
+        var keyInfo = new AccessKey
+        {
+            Consumer = "Test Consumer",
+            EncryptedKey = "encrypted",
+            EncryptionKey = "encryption-key",
+            Active = true,
+            Expires = DateTime.UtcNow.AddDays(30)
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(keyInfo);
+
+        _mockBlobStore.Setup(x => x.ListKeyBlobNames()).Returns(new[] { "Test_Consumer_123.key" });
+        _mockBlobStore.Setup(x => x.DownloadText("Test_Consumer_123.key")).Returns(json);
+
+        // Act
+        _apiKeyCacheService.LoadKeysFromDirectory();
+
+        // Assert
+        Assert.True(_apiKeyCacheService.IsValidKey("decrypted-key"));
     }
 
     [Fact]
@@ -156,3 +179,4 @@ public class ApiKeyCacheServiceTests
             Times.Once);
     }
 }
+

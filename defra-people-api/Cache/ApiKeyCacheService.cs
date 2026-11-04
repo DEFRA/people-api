@@ -8,51 +8,43 @@ public class ApiKeyCacheService : IApiKeyCacheService
 {
     private readonly Dictionary<string, AccessKey> _keyCache = new();
     private readonly ILogger<ApiKeyCacheService> _logger;
-    private readonly string _keysDirectory;
+    private readonly IApiKeyBlobStore _blobStore;
     private readonly IEncryptionService _encryptionService;
 
-    public ApiKeyCacheService(ILogger<ApiKeyCacheService> logger, IEncryptionService encryptionService)
+    public ApiKeyCacheService(ILogger<ApiKeyCacheService> logger, IEncryptionService encryptionService, IApiKeyBlobStore blobStore)
     {
         _logger = logger;
         _encryptionService = encryptionService;
-        _keysDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Keys");
+        _blobStore = blobStore;
     }
 
     public void LoadKeysFromDirectory()
     {
-        _logger.LogInformation("Loading API keys from directory: {Directory}", _keysDirectory);
+        _logger.LogInformation("Loading API keys from Blob storage");
         
         try
         {
             _keyCache.Clear();
             
-            if (!Directory.Exists(_keysDirectory))
-            {
-                Directory.CreateDirectory(_keysDirectory);
-                _logger.LogInformation("Created keys directory: {Directory}", _keysDirectory);
-                return;
-            }
+            var keyBlobNames = _blobStore.ListKeyBlobNames();
+            _logger.LogInformation("Found {Count} key blobs", keyBlobNames.Count);
             
-            // Get all .json files in the directory
-            var keyFiles = Directory.GetFiles(_keysDirectory, "*.key");
-            _logger.LogInformation("Found {Count} key files", keyFiles.Length);
-            
-            foreach (var file in keyFiles)
+            foreach (var blobName in keyBlobNames)
             {
                 try
                 {
-                    var json = File.ReadAllText(file);
+                    var json = _blobStore.DownloadText(blobName);
                     var keyInfo = JsonSerializer.Deserialize<AccessKey>(json);
                     
                     if (keyInfo == null)
                     {
-                        _logger.LogWarning("Failed to deserialize key file: {File}", file);
+                        _logger.LogWarning("Failed to deserialize key blob: {Blob}", blobName);
                         continue;
                     }
                     
                     if (!keyInfo.Active || keyInfo.Expires < DateTime.UtcNow)
                     {
-                        _logger.LogInformation("Skipping expired or inactive key: {File}", file);
+                        _logger.LogInformation("Skipping expired or inactive key: {Blob}", blobName);
                         continue;
                     }
                     
@@ -76,7 +68,7 @@ public class ApiKeyCacheService : IApiKeyCacheService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error loading key file: {File}", file);
+                    _logger.LogError(ex, "Error loading key blob: {Blob}", blobName);
                 }
             }
             
@@ -84,7 +76,7 @@ public class ApiKeyCacheService : IApiKeyCacheService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading API keys from directory");
+            _logger.LogError(ex, "Error loading API keys from Blob storage");
         }
     }
 
@@ -109,11 +101,6 @@ public class ApiKeyCacheService : IApiKeyCacheService
 
     public async Task SaveKeyToFile(AccessKey keyInfo)
     {
-        if (!Directory.Exists(_keysDirectory))
-        {
-            Directory.CreateDirectory(_keysDirectory);
-        }
-        
         string originalKey = keyInfo.Key;
         
         try
@@ -123,16 +110,15 @@ public class ApiKeyCacheService : IApiKeyCacheService
             keyInfo.EncryptedKey = encryptedKey;
             keyInfo.EncryptionKey = encryptionKey;
             
-            var filename = $"{keyInfo.Consumer.Replace(" ", "_")}_{DateTime.UtcNow.Ticks}.key";
-            var filePath = Path.Combine(_keysDirectory, filename);
+            var blobName = $"{keyInfo.Consumer.Replace(" ", "_")}_{DateTime.UtcNow.Ticks}.key";
             
             var json = JsonSerializer.Serialize(keyInfo, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(filePath, json);
+            await _blobStore.UploadTextAsync(blobName, json);
             
             keyInfo.Key = originalKey;
             _keyCache[originalKey] = keyInfo;
             
-            _logger.LogInformation("Saved new encrypted API key to file: {File}", filePath);
+            _logger.LogInformation("Saved new encrypted API key to blob: {Blob}", blobName);
         }
         catch (Exception ex)
         {

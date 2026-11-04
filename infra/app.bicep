@@ -44,12 +44,14 @@ resource keyAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// Ready-to-wire app settings (as env vars: DataProtection__<Key>) for whichever compute hosts
-// people-api (Container Apps, App Service, or AKS) - this template does not assume the host.
+// Ready-to-wire app settings (as env vars: DataProtection__<Key>/ApiKeyStorage__<Key>) for whichever
+// compute hosts people-api (Container Apps, App Service, or AKS) - this template does not assume the host.
 output appSettings object = {
   DataProtection__Enabled: 'true'
   DataProtection__BlobUri: 'https://${storage.name}.blob.${az.environment().suffixes.storage}/data-protection/keys.xml'
   DataProtection__KeyIdentifier: '${vault.properties.vaultUri}keys/${wrappingKeyName}'
   DataProtection__ApplicationName: applicationName
   DataProtection__ManagedIdentityClientId: identity.properties.clientId
+  ApiKeyStorage__ContainerUri: 'https://${storage.name}.blob.${az.environment().suffixes.storage}/api-keys'
+  ApiKeyStorage__ManagedIdentityClientId: identity.properties.clientId
 }
