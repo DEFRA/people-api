@@ -42,7 +42,7 @@ public static class AdminDumpCacheEndpoint
             response.Headers.Append("X-State", state);
             return cache;
         })
-        .RequireAuthorization("Admin")
+        .RequireAuthorization("PeopleAdmin")
         .WithApiLogging();
         
         return app;

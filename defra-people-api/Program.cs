@@ -1,5 +1,3 @@
-using Defra_People_API.Services;
-using Microsoft.AspNetCore.Authorization;
 using Defra_People_API.Endpoints;
 using Defra_People_API.Repository;
 using Defra_People_API.Services.Logger;
@@ -9,12 +7,12 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Defra_People_API.Services.Graph;
 using Defra_People_API.Cache;
 using Azure.Identity;
-using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.Identity.Web;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder();
@@ -37,93 +35,24 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
 // no-ops safely when no connection string is configured.
 builder.Services.AddApplicationInsightsTelemetry();
 
-// Entra ID (Azure AD) bearer-token authentication is additive and opt-in: it only activates when
-// AzureAd:TenantId/Audience are configured, so existing X-API-Key consumers keep working unchanged.
-var azureAdTenantId = builder.Configuration["AzureAd:TenantId"];
-var azureAdAudience = builder.Configuration["AzureAd:Audience"] ?? builder.Configuration["AzureAd:ClientId"];
-var entraIdEnabled = !string.IsNullOrWhiteSpace(azureAdTenantId) && !string.IsNullOrWhiteSpace(azureAdAudience);
+// Every request must present a Microsoft Entra ID bearer token scoped to this API. Microsoft.Identity.Web
+// validates the token signature against the tenant's signing keys, the issuer, the audience (this app's
+// registration) and the lifetime - a token merely being valid for the tenant is not enough on its own.
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
-var authenticationBuilder = builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = entraIdEnabled ? "ApiKeyOrEntraId" : ApiKeyAuthenticationOptions.DefaultScheme;
-    options.DefaultChallengeScheme = entraIdEnabled ? "ApiKeyOrEntraId" : ApiKeyAuthenticationOptions.DefaultScheme;
-})
-.AddApiKeyAuthentication();
-
-if (entraIdEnabled)
-{
-    authenticationBuilder
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            options.Authority = $"https://login.microsoftonline.com/{azureAdTenantId}/v2.0";
-            options.Audience = azureAdAudience;
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true
-            };
-        })
-        .AddPolicyScheme("ApiKeyOrEntraId", "API Key or Entra ID bearer token", options =>
-        {
-            options.ForwardDefaultSelector = context =>
-            {
-                var authHeader = context.Request.Headers.Authorization.ToString();
-                return authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-                    ? JwtBearerDefaults.AuthenticationScheme
-                    : ApiKeyAuthenticationOptions.DefaultScheme;
-            };
-        });
-}
-
-builder.Services.AddAuthorization(options =>
-{
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+// App roles are declared on the People API app registration (People.Read, People.Admin) and granted to
+// each consumer's own Entra ID identity (managed identity, workload identity federation, or certificate).
+// "PeopleRead" is satisfied by either role since People.Admin is a superset of read access.
+builder.Services.AddAuthorizationBuilder()
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
-        .Build();
-        
-    options.AddPolicy("Admin", policy =>
-        policy.RequireAssertion(context =>
-        {
-            // has the admin API key?
-            var httpContext = context.Resource as HttpContext;
-            if (httpContext == null) return false;
-            
-            if (!httpContext.Request.Headers.TryGetValue("X-API-Key", out var apiKeyHeaderValues))
-                return false;
-                
-            var providedApiKey = apiKeyHeaderValues.FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(providedApiKey))
-                return false;
-            
-            var authConfigProvider = httpContext.RequestServices.GetRequiredService<IAuthConfigProvider>();
-            var authConfig = authConfigProvider.GetAuthConfig();
-            var adminApiKey = authConfig.AdminApiKey;
-            
-            return providedApiKey == adminApiKey;
-        }));
-});
+        .Build())
+    .AddPolicy("PeopleRead", policy => policy.RequireRole("People.Read", "People.Admin"))
+    .AddPolicy("PeopleAdmin", policy => policy.RequireRole("People.Admin"));
 
-// Persists the Data Protection key ring to Blob Storage + Key Vault when DataProtection:Enabled is
-// true, so AdminApiKey/MasterKey protection survives restarts and is shared across replicas.
-builder.Services.AddPeopleApiDataProtection(builder.Configuration);
-
-// Issued API keys are persisted to Blob Storage, not local disk, so they survive restarts and
-// are shared across replicas/redeploys (container filesystems are ephemeral and per-instance).
-var apiKeyContainerUri = builder.Configuration["ApiKeyStorage:ContainerUri"]
-    ?? throw new InvalidOperationException("ApiKeyStorage:ContainerUri is not configured");
-var apiKeyManagedIdentityClientId = builder.Configuration["ApiKeyStorage:ManagedIdentityClientId"];
-builder.Services.AddSingleton(new BlobContainerClient(new Uri(apiKeyContainerUri), new DefaultAzureCredential(new DefaultAzureCredentialOptions
-{
-    ManagedIdentityClientId = string.IsNullOrWhiteSpace(apiKeyManagedIdentityClientId) ? null : apiKeyManagedIdentityClientId
-})));
-builder.Services.AddSingleton<IApiKeyBlobStore, ApiKeyBlobStore>();
-
-// Careful with reordering these some depend on each other
-builder.Services.AddSingleton<IMasterKeyProvider, MasterKeyProvider>();
-builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
-builder.Services.AddSingleton<IEncryptedConfigService, EncryptedConfigService>();
-builder.Services.AddSingleton<IApiKeyCacheService, ApiKeyCacheService>();
 builder.Services.AddSingleton<IUserCache, UserCache>();
-builder.Services.AddSingleton<IAuthConfigProvider, AuthConfigProvider>();
 builder.Services.AddSingleton<IGraphClientFactory, GraphClientFactory>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 
@@ -164,20 +93,13 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo { Title = "Defra People API", Version = "v1" });
 
-    options.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
-    {
-        Name = "X-API-Key",
-        Type = SecuritySchemeType.ApiKey,
-        In = ParameterLocation.Header,
-        Description = "API key issued by the People API admin endpoints"
-    });
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
-        Description = "Microsoft Entra ID bearer token (when enabled)"
+        Description = "Microsoft Entra ID bearer token, carrying the People.Read or People.Admin app role"
     });
 });
 
@@ -216,14 +138,6 @@ if (app.Configuration.GetValue("Swagger:Enabled", app.Environment.IsDevelopment(
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
-var apiKeyCacheService = app.Services.GetRequiredService<IApiKeyCacheService>();
-apiKeyCacheService.LoadKeysFromDirectory();
-
-// Protect the MasterKey and AdminApiKey
-var encryptedConfigService = app.Services.GetRequiredService<IEncryptedConfigService>();
-encryptedConfigService.EnsureMasterKeyEncrypted();
-encryptedConfigService.EnsureAdminApiKeyEncrypted();
 
 var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
 var logger = loggerFactory.CreateLogger("ApiLogger");

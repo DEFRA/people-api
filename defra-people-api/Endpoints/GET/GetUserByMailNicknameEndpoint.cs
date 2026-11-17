@@ -27,6 +27,7 @@ public static class GetUserByMailNicknameEndpoint
             response.Headers.Append("X-State", state);
             return Results.Ok(user);
         })
+        .RequireAuthorization("PeopleRead")
         .WithApiLogging();
         
         return app;

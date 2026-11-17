@@ -33,7 +33,7 @@ public static class AdminPurgeCacheEndpoint
             return purgeCache;
             
         })
-        .RequireAuthorization("Admin")
+        .RequireAuthorization("PeopleAdmin")
         .WithApiLogging();
         
         return app;
