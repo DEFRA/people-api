@@ -6,11 +6,14 @@
     "prefix": { "value": null },
     "environmentName": { "value": null },
     "tags": { "value": null },
-    "keyRingStorageSku": { "value": null },
-    "blobSoftDeleteDays": { "value": null },
-    "vaultSoftDeleteDays": { "value": null },
-    "wrappingKeyRotationDays": { "value": null },
-    "wrappingKeyExpiryDays": { "value": null },
-    "wrappingKeySize": { "value": null }
+    "vnetCidr": { "value": null },
+    "acaSubnetCidr": { "value": null },
+    "privateEndpointSubnetCidr": { "value": null },
+    "acaZoneRedundant": { "value": null },
+    "acrSku": { "value": null },
+    "acrZoneRedundant": { "value": null },
+    "logRetentionDays": { "value": null },
+    "applicationInsightsRetentionDays": { "value": null },
+    "vaultSoftDeleteDays": { "value": null }
   }
 }

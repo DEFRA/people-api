@@ -1,6 +1,6 @@
 # Operations Notes - Defra People API
 
-How to configure, run, containerise and operate the service. CI/CD pipeline wiring (deploy tasks) and infrastructure provisioning are not covered here.
+How to configure, run, containerise and operate the service. CI/CD pipeline wiring (deploy tasks) and infrastructure provisioning (`people-api/infra`) are summarised here; see [infra/README.md](../infra/README.md) for the full Bicep handoff.
 
 ## Configuration
 
@@ -9,44 +9,42 @@ All settings can be supplied as environment variables, using `__` instead of `:`
 | Key | Purpose | Default |
 |---|---|---|
 | `GraphApi:ClientId`, `TenantId`, `Scopes` | Entra ID app registration used for the Microsoft Graph client-credentials flow | empty |
-| `GraphApi:ClientSecret` | App registration secret. **Leave empty to use a managed identity instead** (see below) | empty |
+| `GraphApi:ClientSecret` | App registration secret. **Leave empty to use a managed identity instead** (recommended - see below) | empty |
 | `GraphApi:ManagedIdentityClientId` | Only needed for a **user-assigned** managed identity; leave unset for system-assigned | empty |
-| `ConnectionStrings:LogDb` | SQL Server connection string for the async API request log (`LogDbContext`) | empty |
-| `Authentication:AdminApiKey` | Bootstrap admin API key (encrypted at rest after first startup, see below) | empty |
-| `Encryption:MasterKey` | Master key used to encrypt/decrypt issued API keys. **Never rotate without a plan** - see README | empty |
-| `AzureAd:TenantId`, `AzureAd:Audience` (or `ClientId`) | Enables Entra ID bearer-token authentication **in addition to** `X-API-Key` | empty (Entra ID auth disabled; API key only) |
-| `KeyVault:Uri` | When set (absolute `https` URL), Key Vault secrets are merged into configuration via `DefaultAzureCredential` | empty (not used) |
-| `DataProtection:Enabled`, `BlobUri`, `KeyIdentifier`, `ApplicationName`, `ManagedIdentityClientId` | When `Enabled=true`, persists the Data Protection key ring to Blob Storage and wraps it with a Key Vault key via a user-assigned managed identity, instead of the local/ephemeral default (see below) | `Enabled=false` (local/ephemeral key ring) |
-| `ApplicationInsights:ConnectionString` or `APPLICATIONINSIGHTS_CONNECTION_STRING` | Enables Application Insights telemetry | empty (telemetry off) |
+| `AzureAd:Instance`, `TenantId`, `ClientId` | The People API's **own** Entra ID app registration that Microsoft.Identity.Web validates every incoming bearer token against (signature, issuer, audience, lifetime) | `Instance` defaults to `https://login.microsoftonline.com/`; `TenantId`/`ClientId` required |
+| `Authorization:PeopleReadRole`, `PeopleAdminRole` | App-role token values enforced by the `PeopleRead`/`PeopleAdmin` authorization policies; must match the values defined on the app registration (`infra/entra/New-PeopleApiEntraRegistration.ps1`) and be distinct | `People.Read` / `People.Admin` |
+| `KeyVault:Uri` | When set (absolute `https` URL), Key Vault secrets are merged into configuration via `DefaultAzureCredential`. The only secret people-api currently stores there is the optional Graph client secret below | empty (not used) |
+| `ApplicationInsights:ConnectionString` or `APPLICATIONINSIGHTS_CONNECTION_STRING` | Enables Application Insights telemetry. Registration is a no-op (not a startup failure) when absent - see `Services/ApplicationInsightsRegistration.cs` | empty (telemetry off) |
+| `Telemetry:ManagedIdentityClientId` | Optional: authenticates Application Insights ingestion with this user-assigned managed identity instead of connection-string-only (local) authentication. Requires an Application Insights connection string to also be set | empty |
 | `Cors:AllowedOrigins` | Array of allowed browser origins | empty (CORS denied by default) |
 | `Swagger:Enabled` | Expose `/swagger` outside Development | `false` outside Development |
 
 ### Managed identity for Microsoft Graph
 
-`GraphClientFactory` uses `ClientSecretCredential` when `GraphApi:ClientSecret` is set (existing behaviour, unchanged). When the secret is left empty, it falls back to `DefaultAzureCredential`, which uses the compute's system-assigned managed identity in Azure (App Service/Container Apps/AKS pod identity) and developer sign-in locally. To use this:
+`GraphClientFactory` uses `ClientSecretCredential` when `GraphApi:ClientSecret` is set. When the secret is left empty (the Azure-recommended path), it falls back to `DefaultAzureCredential`, which uses the compute's managed identity in Azure and developer sign-in locally. To use this:
 
-1. Enable a managed identity on the hosting compute.
-2. Grant it the `User.Read.All` application permission on Microsoft Graph (with admin consent) - the same permission the app registration uses today.
-3. Remove/leave empty `GraphApi:ClientSecret` in that environment's configuration.
+1. Enable a managed identity on the hosting compute (a user-assigned identity is provisioned by `people-api/infra/main.bicep`; set `GraphApi:ManagedIdentityClientId` to its client ID).
+2. Grant it the `User.Read.All` application permission on Microsoft Graph (with admin consent).
+3. Remove/leave empty `GraphApi:ClientSecret` in that environment's configuration - this is the default in `infra/app.bicep`.
 
 ### Key Vault
 
-The service authenticates to Key Vault with `DefaultAzureCredential` (managed identity in Azure; developer sign-in locally). Secret names use `--` for `:`, for example `GraphApi--ClientSecret`. The identity needs `Key Vault Secrets User` (or equivalent) on the vault.
+The service authenticates to Key Vault with `DefaultAzureCredential` (managed identity in Azure; developer sign-in locally). Secret names use `--` for `:`, for example `GraphApi--ClientSecret`. The identity needs `Key Vault Secrets User` (or equivalent) on the vault. people-api has no cookies, antiforgery tokens or session state, so unlike the other apps in this portfolio it needs no Data Protection key ring and no Blob Storage account - Key Vault is used solely for the optional Graph client secret above.
 
-### Data Protection key ring (Blob Storage + Key Vault)
+### Entra ID authentication and app roles
 
-By default the Data Protection key ring used to protect `Encryption:MasterKey`/`Authentication:AdminApiKey` is local and ephemeral - fine for a single instance, but it does not survive a restart or scale-out (see [infra/README.md](../infra/README.md)). Set `DataProtection:Enabled=true` plus `BlobUri` (the key-ring blob), `KeyIdentifier` (a versionless Key Vault key URI), `ApplicationName` (stable per environment, distinct across environments) and `ManagedIdentityClientId` to persist the key ring to Blob Storage and wrap it with a Key Vault key via `SharedDataProtection.AddPeopleApiDataProtection` ([Services/Crypto/SharedDataProtection.cs](../defra-people-api/Services/Crypto/SharedDataProtection.cs)). The `people-api/infra` Bicep templates provision the Key Vault, storage container and managed identity this requires.
+Every request must present a Microsoft Entra ID bearer token (`Authorization: Bearer <token>`) - there is no anonymous or API-key fallback (see [docs/Consumer-Handoff.md](./Consumer-Handoff.md) for the full migration from the old `X-API-Key` scheme). `Microsoft.Identity.Web` validates the token's signature, issuer, audience and lifetime against `AzureAd:TenantId`/`ClientId`. The token must also carry the `People.Read` or `People.Admin` app role (configurable via `Authorization:PeopleReadRole`/`PeopleAdminRole`): `People.Admin` is a superset of `People.Read`. Onboard each consumer with its own Entra ID identity (prefer managed identity for Azure-hosted consumers, workload identity federation where supported, otherwise a certificate) and grant it the role it needs with `infra/entra/Grant-PeopleApiRole.ps1` - see that script and `infra/entra/New-PeopleApiEntraRegistration.ps1` for the one-time app-registration setup. A token already issued may remain usable until it expires after a role is removed; factor token lifetime into revocation planning.
 
-### Entra ID authentication (additive, non-breaking)
+### API call audit logging
 
-By default the API authenticates every request with the existing `X-API-Key` header scheme - **no change for current consumers** (for example `baqu`). Setting `AzureAd:TenantId` and `AzureAd:Audience` (or `ClientId`) additionally accepts a valid Entra ID bearer token (`Authorization: Bearer <token>`) as an alternative credential on the same endpoints; whichever is presented is validated. There is no requirement to migrate existing API-key consumers.
+Each API call is captured by `ApiLoggerFilter` (consumer, method, endpoint, user, params, response, log level, runtime) and queued via `ILogQueue`. `LogProcessingService`, a background hosted service, drains that queue and writes each entry through the standard logging pipeline (`ILogger`), so it flows to the console and to Application Insights when configured - there is no SQL database or other persistent log store.
 
 ## Health endpoints
 
 | Path | Meaning |
 |---|---|
 | `/health/live` | The process is running (self-check only) |
-| `/health/ready` | Microsoft Graph and the log database are reachable |
+| `/health/ready` | Microsoft Graph is reachable |
 | `/health` | Combined view of all registered checks |
 
 These back container/orchestrator liveness and readiness probes (Azure Container Apps, App Service, AKS). No authentication is required for health endpoints.
@@ -57,7 +55,7 @@ These back container/orchestrator liveness and readiness probes (Azure Container
 
 ## Containerisation
 
-A multi-stage `Dockerfile` is provided at the repository root (`people-api/Dockerfile`), producing a non-root, chiseled ASP.NET Core 10 image. It listens on port `8080` (`ASPNETCORE_HTTP_PORTS`). No secrets are baked into the image; all secrets/connection strings must be supplied via environment variables, Key Vault, or an orchestrator secret store at deploy time.
+A multi-stage `Dockerfile` is provided at the repository root (`people-api/Dockerfile`), producing a non-root, chiseled ASP.NET Core 10 image. Base images are pinned to exact tags (`sdk:10.0.403-noble`, `aspnet:10.0.14-noble-chiseled-extra`), matching the pinning discipline used across the portfolio. It listens on port `8080` (`ASPNETCORE_HTTP_PORTS`). No secrets are baked into the image; all secrets/connection strings must be supplied via environment variables, Key Vault, or an orchestrator secret store at deploy time.
 
 Build and run locally:
 
@@ -65,19 +63,12 @@ Build and run locally:
 docker build -t defra-people-api -f people-api/Dockerfile people-api
 docker run -p 8080:8080 \
   -e GraphApi__ClientId=<id> -e GraphApi__TenantId=<tenant> \
-  -e ConnectionStrings__LogDb=<connection-string> \
-  -e Authentication__AdminApiKey=<key> -e Encryption__MasterKey=<key> \
-  -e DataProtection__Enabled=<true-or-false> \
+  -e AzureAd__TenantId=<tenant> -e AzureAd__ClientId=<client-id> \
   defra-people-api
 ```
 
-> Docker build was not executed in this environment (Docker Desktop was not running) - validate the image build and a smoke run before relying on it in CI/CD.
+## Known limitations / follow-ups
 
-## Known limitations / follow-ups (not changed in this pass)
+1. **CI/CD deploy stages are placeholders.** `azure-pipelines.yaml` builds, tests and packages the app but its `DeployToNonProd`/`DeployToProd` stages only `echo` - no live deployment task is wired up, unlike `rpa-mts-inspections`'s pipeline (real ACR push + Trivy scan + `az deployment group create`). Port that pattern here as part of the Azure handoff.
+2. **Infra has not been deployed or validated against a real subscription.** `people-api/infra` was authored/updated against the same pattern as the other four apps in this portfolio but, like them, has not been run through `az deployment group what-if`/`create` or Microsoft Entra ID for real - see `infra/README.md` for the full manual-checkpoint list.
 
-These require real Azure infrastructure to implement and verify safely, so they are documented rather than attempted here:
-
-1. **API key storage does not scale out.** `ApiKeyCacheService.LoadKeysFromDirectory()` reads `.key` files from a local `Keys` folder next to the app. This works for a single instance but is not shared across container replicas or redeploys. Recommend moving to a durable, shared store (database table, Azure Files, or Blob Storage) before running more than one replica.
-2. **Data Protection key ring persistence - implemented, opt-in.** `EncryptedConfigService` uses `IDataProtectionProvider` to encrypt `Encryption:MasterKey` and `Authentication:AdminApiKey`, and writes the protected value back into `appsettings.json` on disk. `SharedDataProtection.AddPeopleApiDataProtection` now supports `PersistKeysToAzureBlobStorage` + `ProtectKeysWithAzureKeyVault` (see the Data Protection section above and `people-api/infra`), but it only activates when `DataProtection:Enabled=true` is configured - leaving it unset keeps the previous local/ephemeral key ring, which is not shared across replicas or restarts. Set `DataProtection:Enabled=true` (with the required Azure infra deployed) before scaling out beyond a single replica.
-3. **CI/CD deploy stages are placeholders.** `azure-pipelines.yaml` builds, tests and packages the app but its `DeployToNonProd`/`DeployToProd` stages only `echo` - no live deployment task is wired up. Add an `AzureWebApp@1`, container registry push + Container Apps/AKS deploy task, or GitHub Actions equivalent as part of the Azure handoff.
-4. **Master key rotation risk** (pre-existing, unchanged): losing or rotating `Encryption:MasterKey` invalidates every previously issued API key. Keep a secure backup and treat it as a Key Vault secret with strict access control.

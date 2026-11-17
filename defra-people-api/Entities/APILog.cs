@@ -1,5 +1,3 @@
-using System.ComponentModel.DataAnnotations.Schema;
-
 namespace Defra_People_API.Entities;
 
 public enum LogLevel

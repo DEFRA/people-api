@@ -22,10 +22,10 @@ public static partial class Endpoints
             AllowCachingResponses = false
         }).AllowAnonymous();
         
-        // checks if the api is ready to accept requests
+        // checks if the api is ready to accept requests (Microsoft Graph reachable)
         app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = check => check.Tags.Contains("self") || check.Tags.Contains("data_store"),
+            Predicate = check => check.Tags.Contains("self") || check.Tags.Contains("external_dependency"),
             ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
             AllowCachingResponses = false
         }).AllowAnonymous();

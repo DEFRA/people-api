@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 # Builds defra-people-api for Azure Container Apps / App Service (Linux) / AKS.
 # Base image pins: pin to a specific tag (not ":latest") so builds are reproducible; bump deliberately.
-ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
-ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.403-noble
+ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra
 
 FROM $DOTNET_SDK_IMAGE AS build
 ARG BUILD_CONFIGURATION=Release
@@ -21,7 +21,7 @@ RUN dotnet publish -c $BUILD_CONFIGURATION -o /app/publish \
     /p:UseAppHost=false
 
 # Chiseled "-extra" runtime: no shell/package manager (smaller attack surface, fewer CVEs) but keeps
-# ICU + tzdata, which EF Core/SqlClient need for collation/culture-aware operations.
+# ICU + tzdata, needed for culture-aware formatting and time zone handling elsewhere in the app.
 FROM $DOTNET_RUNTIME_IMAGE AS final
 WORKDIR /app
 COPY --chown=$APP_UID:$APP_UID --from=build /app/publish .
@@ -40,6 +40,6 @@ USER $APP_UID
 LABEL org.opencontainers.image.title="defra-people-api" \
       org.opencontainers.image.description="Defra People API - Microsoft Graph user lookup service" \
       org.opencontainers.image.vendor="DEFRA" \
-      org.opencontainers.image.base.name="mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra"
+      org.opencontainers.image.base.name="mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra"
 
 ENTRYPOINT ["dotnet", "defra-people-api.dll"]

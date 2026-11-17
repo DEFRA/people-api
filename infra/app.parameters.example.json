@@ -4,6 +4,23 @@
   "parameters": {
     "location": { "value": null },
     "prefix": { "value": null },
-    "environmentName": { "value": null }
+    "environmentName": { "value": null },
+    "tags": { "value": null },
+    "imageRepository": { "value": null },
+    "imageDigest": { "value": null },
+    "entraTenantId": { "value": null },
+    "entraClientId": { "value": null },
+    "peopleReadRole": { "value": null },
+    "peopleAdminRole": { "value": null },
+    "graphApiClientId": { "value": null },
+    "graphApiTenantId": { "value": null },
+    "graphApiScopes": { "value": null },
+    "graphApiClientSecretName": { "value": "" },
+    "corsAllowedOrigins": { "value": [] },
+    "containerSize": { "value": null },
+    "minReplicas": { "value": null },
+    "maxReplicas": { "value": null },
+    "concurrentRequests": { "value": null },
+    "terminationGracePeriodSeconds": { "value": null }
   }
 }

@@ -4,8 +4,9 @@ A .NET API service that provides access to user information from Microsoft Graph
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
-- Azure AD application registration with Microsoft Graph API permissions
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
+- A Microsoft Entra ID app registration for **this API** (validates incoming bearer tokens) - see [infra/entra/New-PeopleApiEntraRegistration.ps1](infra/entra/New-PeopleApiEntraRegistration.ps1)
+- A **separate** Microsoft Entra ID app registration (or managed identity) for calling Microsoft Graph
 
 ## Local Environment Setup
 
@@ -19,20 +20,19 @@ The project includes a `secrets.template.json` file that you can use as a templa
 
 ```json
 {
-    "GraphApi:ClientId": "your-client-id",
-    "GraphApi:ClientSecret": "your-client-secret",
+    "GraphApi:ClientId": "your-graph-app-client-id",
+    "GraphApi:ClientSecret": "your-graph-app-client-secret",
     "GraphApi:TenantId": "your-tenant-id",
     "GraphApi:Scopes": ["User.Read.All"],
-    "Authentication:AdminApiKey": "",
-    "Encryption:MasterKey": ""
+    "AzureAd:Instance": "https://login.microsoftonline.com/",
+    "AzureAd:TenantId": "your-tenant-id",
+    "AzureAd:ClientId": "your-people-api-client-id"
 }
 ```
 
-You'll also need to add the Authentication and Encryption settings to this file.
-
 #### Option 2: Using appsettings.Development.json
 
-Create an `appsettings.Development.json` file in the `defra.people-api` directory:
+Create an `appsettings.Development.json` file in the `defra-people-api` directory:
 
 ```json
 {
@@ -43,44 +43,27 @@ Create an `appsettings.Development.json` file in the `defra.people-api` director
     }
   },
   "GraphApi": {
-    "ClientId": "your-client-id",
-    "ClientSecret": "your-client-secret",
+    "ClientId": "your-graph-app-client-id",
+    "ClientSecret": "your-graph-app-client-secret",
     "TenantId": "your-tenant-id",
     "Scopes": ["User.Read.All"]
   },
-  "Authentication": {
-    "AdminApiKey": "your-admin-api-key"
-  },
-  "Encryption": {
-    "MasterKey": "your-encryption-master-key"
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "your-tenant-id",
+    "ClientId": "your-people-api-client-id"
   }
 }
 ```
 
-### 2. Master Encryption Key
+### 2. App roles
 
-The `Encryption:MasterKey` setting is used to encrypt and decrypt API keys. This key is critical for the operation of the API.
+Requests must carry the `People.Read` or `People.Admin` app role (configurable via `Authorization:PeopleReadRole`/`PeopleAdminRole`, defaulting to those two values). Define them on the app registration with `infra/entra/New-PeopleApiEntraRegistration.ps1`, then grant each consumer's own identity the role it needs with `infra/entra/Grant-PeopleApiRole.ps1` - see [docs/Operations-Notes.md](docs/Operations-Notes.md).
 
-**IMPORTANT**: If the master encryption key is lost or changed, all previously generated API keys will become invalid and will need to be regenerated. Make sure to:
-
-- Keep a secure backup of this key
-- Use the same key across all environments that need to share API keys
-- Never change this key unless you're prepared to regenerate all API keys
-
-### 3. Generate Admin API Key
-
-You can generate a secure admin API key using the provided script:
+### 3. Build and Run the API
 
 ```bash
-./defra.people-api/generate-admin-key.sh
-```
-
-Use the generated key in your configuration (User Secrets or appsettings file).
-
-### 4. Build and Run the API
-
-```bash
-cd defra.people-api
+cd defra-people-api
 dotnet build
 dotnet run
 ```
@@ -91,21 +74,20 @@ The API will be available at `https://localhost:7068` by default.
 
 ### GET Endpoints
 
-- `/`
-- `/getusers/by-sid`
-- `/getusers/by-mailnickname`
-- `/getusers/by-samaccount`
-- `/admin/list-api-keys`
+- `/` (anonymous)
+- `/getusers/by-sid/{id}` (requires `People.Read` or `People.Admin`)
+- `/getusers/by-mailnickname/{id}` (requires `People.Read` or `People.Admin`)
+- `/getusers/by-samaccount/{id}` (requires `People.Read` or `People.Admin`)
+- `/admin/dump-cache` (requires `People.Admin`)
 
 ### POST Endpoints
 
-- `/admin/generate-api-key`
-- `/admin/refresh-api-keys`
+- `/admin/purge-cache` (requires `People.Admin`)
 
 ### Health Checks
 
 - `/health/live` - liveness probe (process is running)
-- `/health/ready` - readiness probe (Microsoft Graph + log database reachable)
+- `/health/ready` - readiness probe (Microsoft Graph reachable)
 - `/health` - combined health check view
 
 ### API Documentation
@@ -114,7 +96,7 @@ Swagger/OpenAPI UI is available at `/swagger`, enabled by default in the Develop
 
 ## Authentication
 
-Existing `X-API-Key` header authentication is unchanged for all current consumers. Optionally, setting `AzureAd:TenantId` and `AzureAd:Audience` (or `ClientId`) additionally accepts a Microsoft Entra ID bearer token (`Authorization: Bearer <token>`) on the same endpoints - this is additive and does not require existing API-key consumers to change.
+Every request must present a Microsoft Entra ID bearer token (`Authorization: Bearer <token>`) validated by Microsoft.Identity.Web against `AzureAd:TenantId`/`ClientId` (signature, issuer, audience and lifetime), and carrying the required app role. There is no anonymous or API-key fallback - see [docs/Consumer-Handoff.md](docs/Consumer-Handoff.md) for the consumer migration guide.
 
 ## Microsoft Graph credentials
 
@@ -122,12 +104,8 @@ By default the Graph client uses `GraphApi:ClientId`/`ClientSecret`/`TenantId` (
 
 ## Azure Key Vault and Application Insights
 
-- Set `KeyVault:Uri` to an Azure Key Vault URL to merge Key Vault secrets into configuration (authenticates via `DefaultAzureCredential`).
+- Set `KeyVault:Uri` to an Azure Key Vault URL to merge Key Vault secrets into configuration (authenticates via `DefaultAzureCredential`). The only secret people-api stores there is an optional Microsoft Graph client secret - this is a stateless bearer-token API with no cookies/session state, so it needs no Data Protection key ring or Blob Storage, unlike the portfolio's user-facing apps.
 - Set `ApplicationInsights:ConnectionString` or the `APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable to enable Application Insights telemetry and exception tracking.
-
-## Data Protection key ring
-
-By default the Data Protection key ring is local/ephemeral (fine for a single instance, but lost on restart and not shared across replicas). Set `DataProtection:Enabled=true` (plus `BlobUri`, `KeyIdentifier`, `ApplicationName`, `ManagedIdentityClientId`) to persist it to Blob Storage, wrapped by a Key Vault key, via a user-assigned managed identity. See [infra/README.md](infra/README.md) for the Bicep templates that provision this, and [docs/Operations-Notes.md](docs/Operations-Notes.md) for the full setting reference.
 
 ## Containerisation
 

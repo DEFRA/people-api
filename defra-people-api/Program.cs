@@ -1,8 +1,6 @@
 using Defra_People_API.Services;
 using Defra_People_API.Endpoints;
-using Defra_People_API.Repository;
 using Defra_People_API.Services.Logger;
-using Microsoft.EntityFrameworkCore;
 using Defra_People_API.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Defra_People_API.Services.Graph;
@@ -33,8 +31,8 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
 }
 
 // Enabled via APPLICATIONINSIGHTS_CONNECTION_STRING (or ApplicationInsights:ConnectionString) env var;
-// no-ops safely when no connection string is configured.
-builder.Services.AddApplicationInsightsTelemetry();
+// no-ops safely when no connection string is configured (see ApplicationInsightsRegistration.cs).
+builder.Services.AddPeopleApiApplicationInsights(builder.Configuration);
 
 // Every request must present a Microsoft Entra ID bearer token scoped to this API. Microsoft.Identity.Web
 // validates the token signature against the tenant's signing keys, the issuer, the audience (this app's
@@ -43,22 +41,29 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
-// App roles are declared on the People API app registration (People.Read, People.Admin) and granted to
-// each consumer's own Entra ID identity (managed identity, workload identity federation, or certificate).
-// "PeopleRead" is satisfied by either role since People.Admin is a superset of read access.
+// App roles are declared on the People API app registration and granted to each consumer's own Entra ID
+// identity (managed identity, workload identity federation, or certificate). Role token values are
+// configurable (Authorization:PeopleReadRole/PeopleAdminRole) rather than hardcoded, matching the pattern
+// in rpa-inspections-workbench/rpa-mts-inspections, so they can differ per environment and must match the
+// app registration's app-role values. "PeopleRead" is satisfied by either role since People.Admin is a
+// superset of read access.
+var peopleReadRole = builder.Configuration["Authorization:PeopleReadRole"] ?? "People.Read";
+var peopleAdminRole = builder.Configuration["Authorization:PeopleAdminRole"] ?? "People.Admin";
+if (string.Equals(peopleReadRole, peopleAdminRole, StringComparison.Ordinal))
+{
+    throw new InvalidOperationException("Authorization:PeopleReadRole and Authorization:PeopleAdminRole must be distinct Entra app-role values.");
+}
+
 builder.Services.AddAuthorizationBuilder()
     .SetFallbackPolicy(new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build())
-    .AddPolicy("PeopleRead", policy => policy.RequireRole("People.Read", "People.Admin"))
-    .AddPolicy("PeopleAdmin", policy => policy.RequireRole("People.Admin"));
+    .AddPolicy("PeopleRead", policy => policy.RequireRole(peopleReadRole, peopleAdminRole))
+    .AddPolicy("PeopleAdmin", policy => policy.RequireRole(peopleAdminRole));
 
 builder.Services.AddSingleton<IUserCache, UserCache>();
 builder.Services.AddSingleton<IGraphClientFactory, GraphClientFactory>();
 builder.Services.AddScoped<IGraphService, GraphService>();
-
-builder.Services.AddDbContext<LogDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("LogDb")));
 
 // Load the log queue as a background service
 builder.Services.AddSingleton<ILogQueue, LogQueue>();
@@ -73,7 +78,6 @@ builder.Services.AddControllers(options =>
 
 builder.Services.AddHealthChecks()
     .AddCheck<GraphApiHealthCheck>("graph_api", tags: new[] { "external_dependency" })
-    .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "data_store" })
     .AddCheck("api_self", () => HealthCheckResult.Healthy("API is running"), tags: new[] { "self" });
 
 // CORS is secure-by-default (no cross-origin access) unless Cors:AllowedOrigins is configured.
@@ -150,10 +154,17 @@ app.UseCors("ConfiguredOrigins");
 
 app.RegisterEndpoints();
 
-app.UseHsts();
-// Disabled by default: TLS is expected to terminate at the container/ingress layer (Azure Container
-// Apps, App Service, or an AKS ingress controller). Enable only if this service terminates TLS itself.
-// app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+// Platform probes (Azure Container Apps/App Service/AKS ingress) use HTTP for /health/live and
+// /health/ready even when the ingress terminates TLS; all other routes retain HTTPS redirection.
+// Matches the pattern in rpa-cph-non-subsidy / rpa-inspections-workbench / rpa-mts-inspections /
+// rpa-quality-checks. HttpsRedirection:HttpsPort is optional (defaults to ASP.NET Core's own default).
+app.UseWhen(context => context.Request.Path != "/health/live" && context.Request.Path != "/health/ready",
+    application => application.UseHttpsRedirection());
 app.UseAuthentication();
 app.UseAuthorization();
 
