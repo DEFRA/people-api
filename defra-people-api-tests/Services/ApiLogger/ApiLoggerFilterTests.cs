@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading.Tasks;
-using Defra_People_API.Cache;
 using Defra_People_API.Entities;
 using Defra_People_API.Services.Logger;
 using Microsoft.AspNetCore.Http;
@@ -19,16 +19,14 @@ public class ApiLoggerFilterTests
 {
     private readonly Mock<ILogQueue> _mockLogQueue;
     private readonly Mock<ILogger<ApiLoggerFilter>> _mockLogger;
-    private readonly Mock<IApiKeyCacheService> _mockApiKeyCacheService;
     private readonly ApiLoggerFilter _filter;
     
     public ApiLoggerFilterTests()
     {
         _mockLogQueue = new Mock<ILogQueue>();
         _mockLogger = new Mock<ILogger<ApiLoggerFilter>>();
-        _mockApiKeyCacheService = new Mock<IApiKeyCacheService>();
         
-        _filter = new ApiLoggerFilter(_mockLogQueue.Object, _mockLogger.Object, _mockApiKeyCacheService.Object);
+        _filter = new ApiLoggerFilter(_mockLogQueue.Object, _mockLogger.Object);
     }
     
     [Fact]
@@ -67,16 +65,51 @@ public class ApiLoggerFilterTests
     }
     
     [Fact]
-    public async Task OnResultExecutionAsync_WithApiKey_ExtractsConsumer()
+    public async Task OnResultExecutionAsync_WithAuthenticatedBearerToken_ExtractsConsumerFromClaims()
     {
         // Arrange
-        var apiKey = "test-api-key";
-        var consumer = "test-consumer";
+        var clientId = "11111111-1111-1111-1111-111111111111";
         
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Method = "GET";
         httpContext.Request.Path = "/api/test";
-        httpContext.Request.Headers["X-API-Key"] = apiKey;
+        httpContext.Items["StartTime"] = DateTime.UtcNow;
+        var identity = new ClaimsIdentity(new[] { new Claim("azp", clientId) }, "Bearer");
+        httpContext.User = new ClaimsPrincipal(identity);
+        
+        var actionContext = new ActionContext(
+            httpContext,
+            new RouteData(),
+            new ActionDescriptor());
+            
+        var resultExecutingContext = new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new OkObjectResult(new { message = "Test" }),
+            new Mock<Controller>().Object);
+            
+        var resultExecutedContext = new ResultExecutedContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new OkObjectResult(new { message = "Test" }),
+            new Mock<Controller>().Object);
+            
+        var nextCallback = new ResultExecutionDelegate(() => Task.FromResult(resultExecutedContext));
+        
+        // Act
+        await _filter.OnResultExecutionAsync(resultExecutingContext, nextCallback);
+        
+        // Assert
+        _mockLogQueue.Verify(x => x.Enqueue(It.Is<LogItem>(item => item.Consumer == clientId)), Times.Once);
+    }
+    
+    [Fact]
+    public async Task OnResultExecutionAsync_WithoutAuthenticatedUser_RecordsUnknownConsumer()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Method = "GET";
+        httpContext.Request.Path = "/api/test";
         httpContext.Items["StartTime"] = DateTime.UtcNow;
         
         var actionContext = new ActionContext(
@@ -98,16 +131,11 @@ public class ApiLoggerFilterTests
             
         var nextCallback = new ResultExecutionDelegate(() => Task.FromResult(resultExecutedContext));
         
-        // Set up API key validation
-        _mockApiKeyCacheService.Setup(x => x.IsValidKey(apiKey)).Returns(true);
-        _mockApiKeyCacheService.Setup(x => x.GetAllKeys())
-            .ReturnsAsync(new List<AccessKey> { new AccessKey { Key = apiKey, Consumer = consumer } });
-        
         // Act
         await _filter.OnResultExecutionAsync(resultExecutingContext, nextCallback);
         
         // Assert
-        _mockLogQueue.Verify(x => x.Enqueue(It.Is<LogItem>(item => item.Consumer == consumer)), Times.Once);
+        _mockLogQueue.Verify(x => x.Enqueue(It.Is<LogItem>(item => item.Consumer == "Unknown")), Times.Once);
     }
     
     [Fact]

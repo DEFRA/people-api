@@ -1,3 +1,4 @@
+using Defra_People_API.Services;
 using Defra_People_API.Endpoints;
 using Defra_People_API.Repository;
 using Defra_People_API.Services.Logger;

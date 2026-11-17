@@ -7,13 +7,3 @@ public class GraphApiConfig
     public string TenantId { get; set; } = default!;
     public string[] Scopes { get; set; } = default!;
 }
-
-public class AuthenticationConfig
-{
-    public string AdminApiKey { get; set; } = default!;
-}
-
-public class EncryptionConfig
-{
-    public string MasterKey { get; set; } = default!;
-}

@@ -20,12 +20,6 @@ WORKDIR /src/defra-people-api
 RUN dotnet publish -c $BUILD_CONFIGURATION -o /app/publish \
     /p:UseAppHost=false
 
-# The app persists the encrypted admin/master keys back into appsettings.json and loads API keys
-# from a local "Keys" directory at startup (see EncryptedConfigService/ApiKeyCacheService), so the
-# directory must exist before the non-root chown'd copy below (the chiseled runtime stage has no
-# shell, so this can't be created with RUN there).
-RUN mkdir -p /app/publish/Keys
-
 # Chiseled "-extra" runtime: no shell/package manager (smaller attack surface, fewer CVEs) but keeps
 # ICU + tzdata, which EF Core/SqlClient need for collation/culture-aware operations.
 FROM $DOTNET_RUNTIME_IMAGE AS final
@@ -37,10 +31,6 @@ COPY --chown=$APP_UID:$APP_UID --from=build /app/publish .
 # /health/ready probes (see Endpoints/HealthChecks/Healthcheck.cs).
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
-
-# NOTE: the Keys directory and appsettings.json rewrite above are per-instance, on-disk state that
-# does not survive redeploys or scale-out to multiple replicas; see docs/Operations-Notes.md for the
-# recommended durable-storage follow-up.
 
 # Chiseled images already default to a non-root user, but setting it explicitly documents the intent
 # and matches the Microsoft .NET container samples. $APP_UID is defined by the base image.

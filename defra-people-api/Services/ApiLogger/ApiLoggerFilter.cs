@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Defra_People_API.Cache;
 using Defra_People_API.Entities;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -11,13 +10,11 @@ public class ApiLoggerFilter : IAsyncResultFilter
 {
     private readonly ILogQueue _logQueue;
     private readonly ILogger<ApiLoggerFilter> _logger;
-    private readonly IApiKeyCacheService _apiKeyCacheService;
-    
-    public ApiLoggerFilter(ILogQueue logQueue, ILogger<ApiLoggerFilter> logger, IApiKeyCacheService apiKeyCacheService)
+
+    public ApiLoggerFilter(ILogQueue logQueue, ILogger<ApiLoggerFilter> logger)
     {
         _logQueue = logQueue;
         _logger = logger;
-        _apiKeyCacheService = apiKeyCacheService;
     }
     
     public async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)
@@ -30,7 +27,7 @@ public class ApiLoggerFilter : IAsyncResultFilter
             var endpoint = context.HttpContext.GetEndpoint();
             var endpointName = endpoint?.DisplayName ?? context.HttpContext.Request.Path;
             
-            // Get consumer from API key
+            // Get the calling application's identity from the validated Entra ID bearer token claims
             var consumer = ExtractConsumer(context.HttpContext);
             
             // Get user info from header or use http context user info
@@ -46,7 +43,7 @@ public class ApiLoggerFilter : IAsyncResultFilter
             }
             
             var parameters = GetRequestParameters(context.HttpContext);
-            var responseContent = endpointName.Contains("generate-api-key") ? "New API Key Generated" : GetResponseContent(resultContext.Result);
+            var responseContent = GetResponseContent(resultContext.Result);
             
             var logLevel = DetermineLogLevel(resultContext.Result);
             
@@ -74,23 +71,21 @@ public class ApiLoggerFilter : IAsyncResultFilter
         }
     }
     
+    // Identifies the calling application from the validated token claims, for auditing. Application
+    // (client-credentials) tokens carry the calling application's client ID as "azp" (v2.0) or "appid"
+    // (v1.0); fall back to the subject/name identifier, then "Unknown" for unauthenticated requests.
     private string ExtractConsumer(HttpContext context)
     {
-        if (context.Request.Headers.TryGetValue("X-API-Key", out var apiKeyValues))
+        var user = context.User;
+        if (user?.Identity?.IsAuthenticated != true)
         {
-            var apiKey = apiKeyValues.FirstOrDefault();
-            if (!string.IsNullOrEmpty(apiKey) && _apiKeyCacheService.IsValidKey(apiKey))
-            {
-                // Get all keys and find the one that matches
-                var keyInfo = _apiKeyCacheService.GetAllKeys().Result.FirstOrDefault(k => k.Key == apiKey);
-                if (keyInfo != null)
-                {
-                    return keyInfo.Consumer;
-                }
-            }
+            return "Unknown";
         }
-        
-        return "Unknown";
+
+        return user.FindFirst("azp")?.Value
+            ?? user.FindFirst("appid")?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? "Unknown";
     }
     
     private string GetRequestParameters(HttpContext context)
