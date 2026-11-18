@@ -109,6 +109,12 @@ By default the Graph client uses `GraphApi:ClientId`/`ClientSecret`/`TenantId` (
 
 ## Containerisation
 
+The multi-stage [Dockerfile](./Dockerfile) follows the Defra .NET container standard
+([defra-docker-dotnetcore](https://github.com/DEFRA/defra-docker-dotnetcore)): a `development`
+stage (`defradigital/dotnetcore-development`) restores, tests and publishes the app; a
+`production` stage (`defradigital/dotnetcore`) runs it as the non-root `dotnet` user with write
+permissions removed.
+
 Run from the `people-api` directory (repository root of this project):
 
 ```bash

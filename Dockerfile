@@ -1,45 +1,75 @@
 # syntax=docker/dockerfile:1
-# Builds defra-people-api for Azure Container Apps / App Service (Linux) / AKS.
-# Base image pins: pin to a specific tag (not ":latest") so builds are reproducible; bump deliberately.
-ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.403-noble
-ARG DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra
+# Builds defra-people-api per Defra .NET container standards (github.com/DEFRA/defra-docker-dotnetcore).
+ARG PARENT_VERSION=2.1.9-dotnet10.0
 
-FROM $DOTNET_SDK_IMAGE AS build
-ARG BUILD_CONFIGURATION=Release
-WORKDIR /src
+# Development stage: SDK-based parent image used to restore, test and publish the app.
+FROM defradigital/dotnetcore-development:$PARENT_VERSION AS development
+ENV TZ="Europe/London"
+ARG PARENT_VERSION
 
-# Copy the project file first so `dotnet restore` is cached as its own layer and only reruns when
-# dependencies change, not on every source edit.
-COPY defra-people-api/defra-people-api.csproj defra-people-api/
-RUN dotnet restore defra-people-api/defra-people-api.csproj
+# Label the development image with the parent image it extends.
+LABEL uk.gov.defra.parent-image=defradigital/dotnetcore-development:${PARENT_VERSION}
 
-COPY defra-people-api/ defra-people-api/
-WORKDIR /src/defra-people-api
-# No --no-restore: the separate restore layer above can leave publish unable to see
-# transitively-restored Azure SDK packages, so let publish restore again (fast no-op if unchanged).
-RUN dotnet publish -c $BUILD_CONFIGURATION -o /app/publish \
-    /p:UseAppHost=false
+# Create directories for app and test files to be copied into.
+RUN mkdir -p ./defra-people-api/ ./defra-people-api-tests/
 
-# Chiseled "-extra" runtime: no shell/package manager (smaller attack surface, fewer CVEs) but keeps
-# ICU + tzdata, needed for culture-aware formatting and time zone handling elsewhere in the app.
-FROM $DOTNET_RUNTIME_IMAGE AS final
-WORKDIR /app
-COPY --chown=$APP_UID:$APP_UID --from=build /app/publish .
+# Install test dependencies.
+COPY --chown=dotnet:dotnet defra-people-api-tests/*.csproj ./defra-people-api-tests/
+RUN dotnet restore ./defra-people-api-tests/defra-people-api-tests.csproj
 
-# ASPNETCORE_HTTP_PORTS (not ASPNETCORE_URLS) is the Microsoft-recommended way to set the listen port
-# since .NET 8; the ingress/platform routes traffic here and it backs the /health/live and
-# /health/ready probes (see Endpoints/HealthChecks/Healthcheck.cs).
-ENV ASPNETCORE_HTTP_PORTS=8080
-EXPOSE 8080
+# Install app dependencies.
+COPY --chown=dotnet:dotnet defra-people-api/*.csproj ./defra-people-api/
+RUN dotnet restore ./defra-people-api/defra-people-api.csproj
 
-# Chiseled images already default to a non-root user, but setting it explicitly documents the intent
-# and matches the Microsoft .NET container samples. $APP_UID is defined by the base image.
-USER $APP_UID
+# Copy in test and app code.
+COPY --chown=dotnet:dotnet defra-people-api-tests/ ./defra-people-api-tests/
+COPY --chown=dotnet:dotnet defra-people-api/ ./defra-people-api/
 
-# OCI metadata for image provenance/supply-chain scanning; no functional effect.
-LABEL org.opencontainers.image.title="defra-people-api" \
+# Build the app.
+RUN dotnet publish ./defra-people-api/ -c Release -o /home/dotnet/out
+
+# Expose the app on a defined port, configurable via a build argument. 8080 matches the
+# /health/live and /health/ready probes (see Endpoints/HealthChecks/Healthcheck.cs).
+ARG PORT=8080
+ENV PORT=${PORT}
+EXPOSE ${PORT}
+
+# Exec form needs a script to interpolate ${PORT}; the script itself execs dotnet so it still
+#   receives signals directly rather than a shell.
+# Root-owned so the dotnet user can't modify its own startup script; switch back afterwards.
+USER root
+COPY --chown=root:root dev-entrypoint.sh ./
+RUN chmod +x ./dev-entrypoint.sh
+USER dotnet
+CMD ["./dev-entrypoint.sh"]
+
+# Production stage
+FROM defradigital/dotnetcore:$PARENT_VERSION AS production
+ARG PARENT_VERSION
+
+# Label the production image with the parent image it extends.
+LABEL uk.gov.defra.parent-image=defradigital/dotnetcore-development:${PARENT_VERSION} \
+      org.opencontainers.image.title="defra-people-api" \
       org.opencontainers.image.description="Defra People API - Microsoft Graph user lookup service" \
-      org.opencontainers.image.vendor="DEFRA" \
-      org.opencontainers.image.base.name="mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra"
+      org.opencontainers.image.vendor="DEFRA"
 
-ENTRYPOINT ["dotnet", "defra-people-api.dll"]
+# Expose the app on a defined port, configurable via a build argument.
+ARG PORT=8080
+ENV ASPNETCORE_URLS=http://*:${PORT} \
+    ASPNETCORE_ENVIRONMENT=Production
+EXPOSE ${PORT}
+
+# Switch to root temporarily to lock down file permissions.
+USER root
+
+# Copy the compiled app from the development build stage, assigning root ownership to
+#   prevent modification by other users.
+COPY --from=development --chown=root:root /home/dotnet/out/ ./
+
+# Remove write permissions, then drop back to the unprivileged user.
+RUN chmod -R a-w /home/dotnet
+USER dotnet
+
+# Set the default command for production to run the compiled app.
+CMD ["dotnet", "defra-people-api.dll"]
+

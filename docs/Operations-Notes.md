@@ -55,7 +55,7 @@ These back container/orchestrator liveness and readiness probes (Azure Container
 
 ## Containerisation
 
-A multi-stage `Dockerfile` is provided at the repository root (`people-api/Dockerfile`), producing a non-root, chiseled ASP.NET Core 10 image. Base images are pinned to exact tags (`sdk:10.0.403-noble`, `aspnet:10.0.14-noble-chiseled-extra`), matching the pinning discipline used across the portfolio. It listens on port `8080` (`ASPNETCORE_HTTP_PORTS`). No secrets are baked into the image; all secrets/connection strings must be supplied via environment variables, Key Vault, or an orchestrator secret store at deploy time.
+A multi-stage `Dockerfile` is provided at the repository root (`people-api/Dockerfile`), following the Defra .NET container standard ([defra-docker-dotnetcore](https://github.com/DEFRA/defra-docker-dotnetcore)): a `development` stage built from `defradigital/dotnetcore-development` restores, tests and publishes the app, and a `production` stage built from `defradigital/dotnetcore` runs it as the non-root `dotnet` user with write permissions removed (`chmod -R a-w`). It listens on port `8080` (`ASPNETCORE_URLS`). No secrets are baked into the image; all secrets/connection strings must be supplied via environment variables, Key Vault, or an orchestrator secret store at deploy time.
 
 Build and run locally:
 
