@@ -14,7 +14,7 @@
     "peopleAdminRole": { "value": null },
     "graphApiClientId": { "value": null },
     "graphApiTenantId": { "value": null },
-    "graphApiScopes": { "value": null },
+    "graphApiScopes": { "value": ["https://graph.microsoft.com/.default"] },
     "graphApiClientSecretName": { "value": "" },
     "corsAllowedOrigins": { "value": [] },
     "containerSize": { "value": null },

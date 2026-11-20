@@ -46,7 +46,10 @@ param graphApiClientId string
 @maxLength(36)
 param graphApiTenantId string
 
-@description('Microsoft Graph scopes, e.g. ["User.Read.All"].')
+@description('Microsoft Graph app-only token-request scope: ["https://graph.microsoft.com/.default"]. Application permissions such as User.Read.All are granted separately in Entra ID.')
+@minLength(1)
+@maxLength(1)
+@allowed(['https://graph.microsoft.com/.default'])
 param graphApiScopes array
 
 @description('Name of the owner-populated Key Vault secret holding the Graph app registration client secret. Leave empty (recommended) to use the managed identity instead - see docs/Operations-Notes.md.')
@@ -146,9 +149,7 @@ var baseEnv = [
   { name: 'Telemetry__ManagedIdentityClientId', value: identity.properties.clientId }
 ]
 
-// GraphApi:Scopes binds as an array via GraphApi__Scopes__<index> (standard ASP.NET Core config
-// convention for arrays). Leave graphApiScopes as a single-element array (e.g. ["User.Read.All"])
-// unless the Graph app registration needs more than one application permission.
+// App-only token requests use .default; application permissions are granted separately.
 var scopesEnv = [for (scope, i) in graphApiScopes: {
   name: 'GraphApi__Scopes__${i}'
   value: scope
@@ -176,6 +177,7 @@ module application 'br/public:avm/res/app/container-app:0.23.0' = {
       userAssignedResourceIds: [identity.id]
     }
     activeRevisionsMode: 'Single'
+    // External to the app environment, but private to the internal environment's network.
     ingressExternal: true
     ingressAllowInsecure: false
     ingressTargetPort: 8080

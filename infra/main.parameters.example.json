@@ -10,10 +10,33 @@
     "acaSubnetCidr": { "value": null },
     "privateEndpointSubnetCidr": { "value": null },
     "acaZoneRedundant": { "value": null },
-    "acrSku": { "value": null },
+    "acrSku": { "value": "Premium" },
     "acrZoneRedundant": { "value": null },
     "logRetentionDays": { "value": null },
     "applicationInsightsRetentionDays": { "value": null },
-    "vaultSoftDeleteDays": { "value": null }
+    "vaultSoftDeleteDays": { "value": null },
+    "monitoringAccessProfile": { "value": "Private" },
+    "monitoringTransitionApprovalReference": { "value": "" },
+    "monitoringAmpls": {
+      "value": {
+        "mode": "Create",
+        "associationOwner": "Project",
+        "ingestionAccessMode": "PrivateOnly",
+        "queryAccessMode": "PrivateOnly"
+      }
+    },
+    "monitoringPrivateEndpoint": { "value": { "mode": "Create" } },
+    "monitoringDns": {
+      "value": {
+        "mode": "Managed",
+        "zones": [
+          { "name": "privatelink.monitor.azure.com", "mode": "Create", "linkMode": "Create" },
+          { "name": "privatelink.oms.opinsights.azure.com", "mode": "Create", "linkMode": "Create" },
+          { "name": "privatelink.ods.opinsights.azure.com", "mode": "Create", "linkMode": "Create" },
+          { "name": "privatelink.agentsvc.azure-automation.net", "mode": "Create", "linkMode": "Create" },
+          { "name": "privatelink.blob.core.windows.net", "mode": "Create", "linkMode": "Create" }
+        ]
+      }
+    }
   }
 }

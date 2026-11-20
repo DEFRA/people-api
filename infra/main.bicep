@@ -20,10 +20,11 @@ param acaSubnetCidr string
 param privateEndpointSubnetCidr string
 param acaZoneRedundant bool
 
-@allowed(['Basic', 'Standard', 'Premium'])
+@description('Explicitly approved Premium SKU required for ACR Private Link, not for zone redundancy.')
+@allowed(['Premium'])
 param acrSku string
 
-@description('Requires Premium when true; no registry replication is implied.')
+@description('Legacy ACR property retained for compatibility. Zone redundancy is automatic across all tiers in supported regions regardless of this value; no geo-replication is implied.')
 param acrZoneRedundant bool
 
 @minValue(30)
@@ -37,9 +38,109 @@ param applicationInsightsRetentionDays int
 @maxValue(90)
 param vaultSoftDeleteDays int
 
+@sealed()
+type newAmplsConfig = {
+  mode: 'Create'
+  associationOwner: 'Project'
+  ingestionAccessMode: 'PrivateOnly'
+  queryAccessMode: 'PrivateOnly'
+}
+
+@sealed()
+type existingAmplsConfig = {
+  mode: 'Existing'
+  resourceId: string
+  associationOwner: 'Project' | 'Platform'
+  workspaceAssociationName: string?
+  applicationInsightsAssociationName: string?
+}
+
+@discriminator('mode')
+type amplsConfig = newAmplsConfig | existingAmplsConfig
+
+@sealed()
+type newMonitorEndpointConfig = {
+  mode: 'Create'
+}
+
+@sealed()
+type existingMonitorEndpointConfig = {
+  mode: 'Existing'
+  resourceId: string
+}
+
+@discriminator('mode')
+type monitorEndpointConfig = newMonitorEndpointConfig | existingMonitorEndpointConfig
+
+type monitorZoneName = 'privatelink.monitor.azure.com'
+  | 'privatelink.oms.opinsights.azure.com'
+  | 'privatelink.ods.opinsights.azure.com'
+  | 'privatelink.agentsvc.azure-automation.net'
+  | 'privatelink.blob.core.windows.net'
+
+@sealed()
+type newMonitorZoneConfig = {
+  name: monitorZoneName
+  mode: 'Create'
+  linkMode: 'Create'
+}
+
+@sealed()
+type existingMonitorZoneConfig = {
+  name: monitorZoneName
+  mode: 'Existing'
+  resourceId: string
+  linkMode: 'Create' | 'Existing' | 'External'
+  existingLinkName: string?
+}
+
+@discriminator('mode')
+type monitorZoneConfig = newMonitorZoneConfig | existingMonitorZoneConfig
+
+@sealed()
+type managedMonitorDnsConfig = {
+  mode: 'Managed'
+  @minLength(5)
+  @maxLength(5)
+  zones: monitorZoneConfig[]
+}
+
+@sealed()
+type platformMonitorDnsConfig = {
+  mode: 'PlatformManaged'
+}
+
+@discriminator('mode')
+type monitorDnsConfig = managedMonitorDnsConfig | platformMonitorDnsConfig
+
+@description('Private is the secure default. Transition preserves public monitoring only during an explicitly approved, tested cutover.')
+@allowed(['Private', 'Transition'])
+param monitoringAccessProfile string = 'Private'
+
+@description('Approved change/exception reference for Transition; explicit empty string for Private. Validate with Test-Templates.ps1 before deployment.')
+param monitoringTransitionApprovalReference string
+
+param monitoringAmpls amplsConfig
+param monitoringPrivateEndpoint monitorEndpointConfig
+param monitoringDns monitorDnsConfig
+
 var stem = '${prefix}-${environmentName}'
 var globalStem = '${prefix}${environmentName}${uniqueString(resourceGroup().id, prefix, environmentName)}'
 var applicationName = '${stem}-app'
+var monitoringPublicNetworkAccess = monitoringAccessProfile == 'Transition' && !empty(monitoringTransitionApprovalReference)
+  ? 'Enabled'
+  : 'Disabled'
+var monitorAmplsId = monitoringAmpls.mode == 'Create'
+  ? resourceId('Microsoft.Insights/privateLinkScopes', '${stem}-ampls')
+  : monitoringAmpls.resourceId
+var monitorZones = monitoringDns.mode == 'Managed' ? monitoringDns.zones : []
+var monitorNewZones = filter(monitorZones, zone => zone.mode == 'Create')
+var monitorLinkedZones = filter(monitorZones, zone => zone.linkMode == 'Create')
+var monitorZoneIds = [
+  for zone in monitorZones: zone.mode == 'Create'
+    ? resourceId('Microsoft.Network/privateDnsZones', zone.name)
+    : zone.resourceId
+]
 
 module identity 'br/public:avm/res/managed-identity/user-assigned-identity:0.6.0' = {
   name: '${stem}-identity'
@@ -58,13 +159,13 @@ resource acaNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   properties: {
     securityRules: [
       {
-        name: 'AllowPublicHttpsIngress'
+        name: 'AllowPrivateHttpsIngress'
         properties: {
           priority: 200
           access: 'Allow'
           direction: 'Inbound'
           protocol: 'Tcp'
-          sourceAddressPrefix: 'Internet'
+          sourceAddressPrefix: 'VirtualNetwork'
           sourcePortRange: '*'
           destinationAddressPrefix: acaSubnetCidr
           destinationPortRanges: ['443', '31443']
@@ -118,8 +219,8 @@ module logs 'br/public:avm/res/operational-insights/workspace:0.16.1' = {
     skuName: 'PerGB2018'
     dataRetention: logRetentionDays
     forceCmkForQuery: false
-    publicNetworkAccessForIngestion: 'Enabled'
-    publicNetworkAccessForQuery: 'Enabled'
+    publicNetworkAccessForIngestion: monitoringPublicNetworkAccess
+    publicNetworkAccessForQuery: monitoringPublicNetworkAccess
   }
 }
 
@@ -136,6 +237,8 @@ module insights 'br/public:avm/res/insights/component:0.8.0' = {
     disableIpMasking: false
     disableLocalAuth: true
     retentionInDays: applicationInsightsRetentionDays
+    publicNetworkAccessForIngestion: monitoringPublicNetworkAccess
+    publicNetworkAccessForQuery: monitoringPublicNetworkAccess
   }
 }
 
@@ -166,8 +269,8 @@ module registry 'br/public:avm/res/container-registry/registry:0.13.1' = {
     anonymousPullEnabled: false
     roleAssignmentMode: 'LegacyRegistryPermissions'
     azureADAuthenticationAsArmPolicyStatus: 'enabled'
-    publicNetworkAccess: 'Enabled'
-    networkRuleSetDefaultAction: 'Allow'
+    publicNetworkAccess: 'Disabled'
+    networkRuleSetDefaultAction: 'Deny'
     zoneRedundancy: acrZoneRedundant ? 'Enabled' : 'Disabled'
     retentionPolicyStatus: 'disabled'
     exportPolicyStatus: 'enabled'
@@ -230,6 +333,12 @@ var privateServices = [
     groupId: 'vault'
     zone: 'privatelink.vaultcore.azure.net'
   }
+  {
+    name: 'registry'
+    id: resourceId('Microsoft.ContainerRegistry/registries', 'acr${globalStem}')
+    groupId: 'registry'
+    zone: 'privatelink.azurecr.io'
+  }
 ]
 
 module privateConnections 'modules/private-endpoint.bicep' = [
@@ -245,7 +354,7 @@ module privateConnections 'modules/private-endpoint.bicep' = [
       vnetResourceId: network.outputs.resourceId
       subnetResourceId: '${network.outputs.resourceId}/subnets/private-endpoints'
     }
-    dependsOn: [vault]
+    dependsOn: [vault, registry]
   }
 ]
 
@@ -257,8 +366,8 @@ module environment 'br/public:avm/res/app/managed-environment:0.16.0' = {
     tags: tags
     enableTelemetry: false
     infrastructureSubnetResourceId: '${network.outputs.resourceId}/subnets/aca'
-    internal: false
-    publicNetworkAccess: 'Enabled'
+    internal: true
+    publicNetworkAccess: 'Disabled'
     zoneRedundant: acaZoneRedundant
     workloadProfiles: [
       {
@@ -278,6 +387,79 @@ module environment 'br/public:avm/res/app/managed-environment:0.16.0' = {
   }
 }
 
+module environmentDns 'modules/internal-environment-dns.bicep' = {
+  name: '${stem}-environment-dns'
+  params: {
+    dnsZoneName: environment.outputs.defaultDomain
+    ipv4Address: environment.outputs.staticIp!
+    vnetResourceId: network.outputs.resourceId
+    tags: tags
+  }
+}
+
+module monitorScope 'modules/monitor-private-link-scope.bicep' = if (monitoringAmpls.associationOwner == 'Project') {
+  name: '${stem}-monitor-scope-${uniqueString(resourceGroup().id)}'
+  scope: resourceGroup(split(monitorAmplsId, '/')[2], split(monitorAmplsId, '/')[4])
+  params: {
+    name: last(split(monitorAmplsId, '/'))
+    tags: tags
+    createScope: monitoringAmpls.mode == 'Create'
+    workspaceResourceId: logs.outputs.resourceId
+    applicationInsightsResourceId: insights.outputs.resourceId
+    workspaceAssociationName: monitoringAmpls.mode == 'Create'
+      ? 'workspace-${uniqueString(resourceGroup().id, stem)}'
+      : (monitoringAmpls.associationOwner == 'Project' ? monitoringAmpls.workspaceAssociationName! : '')
+    applicationInsightsAssociationName: monitoringAmpls.mode == 'Create'
+      ? 'insights-${uniqueString(resourceGroup().id, stem)}'
+      : (monitoringAmpls.associationOwner == 'Project' ? monitoringAmpls.applicationInsightsAssociationName! : '')
+  }
+}
+
+module monitorDnsZones 'modules/monitor-private-dns-zone.bicep' = [
+  for zone in monitorNewZones: {
+    name: '${stem}-monitor-dns-${uniqueString(resourceGroup().id, zone.name)}'
+    params: {
+      dnsZoneName: zone.name
+      tags: tags
+      createZone: true
+      createVnetLink: false
+      vnetResourceId: resourceId('Microsoft.Network/virtualNetworks', '${stem}-vnet')
+    }
+  }
+]
+
+module monitorEndpoint 'modules/monitor-private-endpoint.bicep' = if (monitoringPrivateEndpoint.mode == 'Create') {
+  name: '${stem}-monitor-private'
+  params: {
+    name: '${stem}-monitor-pe'
+    location: location
+    tags: tags
+    amplsResourceId: monitorAmplsId
+    subnetResourceId: '${network.outputs.resourceId}/subnets/private-endpoints'
+    dnsZoneResourceIds: monitorZoneIds
+  }
+  dependsOn: [monitorScope, monitorDnsZones]
+}
+
+// Publish new links only after the endpoint's DNS zone group has been provisioned.
+module monitorDnsLinks 'modules/monitor-private-dns-zone.bicep' = [
+  for zone in monitorLinkedZones: {
+    name: '${stem}-monitor-link-${uniqueString(resourceGroup().id, zone.name)}'
+    scope: resourceGroup(
+      zone.mode == 'Create' ? subscription().subscriptionId : split(zone.resourceId, '/')[2],
+      zone.mode == 'Create' ? resourceGroup().name : split(zone.resourceId, '/')[4]
+    )
+    params: {
+      dnsZoneName: zone.name
+      tags: tags
+      createZone: false
+      createVnetLink: true
+      vnetResourceId: resourceId('Microsoft.Network/virtualNetworks', '${stem}-vnet')
+    }
+    dependsOn: [network, monitorEndpoint, monitorDnsZones]
+  }
+]
+
 output applicationHost string = '${applicationName}.${environment.outputs.defaultDomain}'
 output applicationOrigin string = 'https://${applicationName}.${environment.outputs.defaultDomain}'
 output applicationName string = applicationName
@@ -292,3 +474,12 @@ output keyVaultName string = vault.outputs.name
 output applicationInsightsResourceId string = insights.outputs.resourceId
 output logAnalyticsResourceId string = logs.outputs.resourceId
 output acaSubnetCidr string = acaSubnetCidr
+output virtualNetworkResourceId string = network.outputs.resourceId
+output applicationPrivateDnsZoneId string = environmentDns.outputs.resourceId
+output applicationInternalIpAddress string = environment.outputs.staticIp!
+output monitorPrivateLinkScopeResourceId string = monitorAmplsId
+output monitorPrivateEndpointResourceId string = monitoringPrivateEndpoint.mode == 'Create'
+  ? monitorEndpoint!.outputs.resourceId
+  : monitoringPrivateEndpoint.resourceId
+output monitorPrivateDnsZoneResourceIds array = monitorZoneIds
+output monitoringAccessProfile string = monitoringAccessProfile
